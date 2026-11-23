@@ -7,7 +7,7 @@
   var DATA = window.RADAR;
   if (!DATA) return;
   var app = document.getElementById('board');
-  var state = { q: '', category: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null };
+  var state = { q: '', category: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null, compare: { left: null, right: null } };
 
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   function fmtUsd(n) {
@@ -141,6 +141,9 @@
     if (params.get('p')) state.selected = params.get('p');
     if (params.get('category')) state.category = params.get('category');
     if (params.get('sort')) state.sort = params.get('sort');
+    // compare hash params
+    if (params.get('compare-left')) state.compare.left = params.get('compare-left');
+    if (params.get('compare-right')) state.compare.right = params.get('compare-right');
   }
   function writeHash() {
     var params = new URLSearchParams();
@@ -148,6 +151,9 @@
     if (state.category !== 'all') params.set('category', state.category);
     if (state.selected) params.set('p', state.selected);
     if (state.sort !== 'implied') params.set('sort', state.sort);
+    // compare hash params
+    if (state.compare.left) params.set('compare-left', state.compare.left);
+    if (state.compare.right) params.set('compare-right', state.compare.right);
     var next = params.toString();
     if (next) window.history.replaceState(null, '', '#' + next);
     else window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -253,11 +259,28 @@
     sortSelect.addEventListener('change', function () { state.sort = sortSelect.value; state.dir = -1; writeHash(); render(); });
     var pre = el('button', { type: 'button', 'aria-pressed': state.tab === 'pre-token' ? 'true' : 'false', text: 'Pre-token', onclick: function () { state.tab = 'pre-token'; render(); } });
     var live = el('button', { type: 'button', 'aria-pressed': state.tab === 'live' ? 'true' : 'false', text: 'Live token', onclick: function () { state.tab = 'live'; render(); } });
+    // Compare controls
+    var compareLeft = el('select', { id: 'compare-left', 'aria-label': 'Compare left protocol' });
+    var compareRight = el('select', { id: 'compare-right', 'aria-label': 'Compare right protocol' });
+    // Populate compare selects with top board rows
+    var topRows = DATA.rows.slice(0, 20);
+    var defaultOpt = el('option', { value: '', text: 'Select protocol' });
+    compareLeft.appendChild(defaultOpt);
+    compareRight.appendChild(defaultOpt.cloneNode(true));
+    topRows.forEach(function (r) {
+      var optL = el('option', { value: r.slug, text: r.name + ' (' + r.category + ')' });
+      var optR = optL.cloneNode(true);
+      compareLeft.appendChild(optL);
+      compareRight.appendChild(optR);
+    });
+    compareLeft.addEventListener('change', function () { state.compare.left = compareLeft.value; writeHash(); render(); });
+    compareRight.addEventListener('change', function () { state.compare.right = compareRight.value; writeHash(); render(); });
     return el('div', { class: 'controls' },
       el('div', { class: 'field' }, el('label', { for: 'q', text: 'Search' }), search),
       el('div', { class: 'field' }, el('label', { for: 'category', text: 'Category' }), select),
       el('div', { class: 'sort-controls' }, el('span', { class: 'sort-label', text: 'Sort' }), sortSelect),
       el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Token status' }), el('div', { class: 'tabs' }, pre, live)),
+      el('div', { class: 'field' }, el('span', { class: 'sub', text: 'Comparison' }), el('div', { class: 'tabs' }, compareLeft, compareRight)),
       el('span', { class: 'count', text: state.tab === 'pre-token' ? rows().length + ' of ' + DATA.board_size + ' rows shown' : DATA.live.length + ' live-token protocols' })
     );
   }
@@ -321,6 +344,53 @@
             sortHeader('implied', 'Implied Value'),
             el('th', { scope: 'col', text: 'Token' })
           )),
+          tbody
+        )
+      )
+    );
+}
+
+  function renderCompare() {
+    if (!state.compare.left || !state.compare.right) return null;
+    var leftRow = DATA.rows.find(function (r) { return r.slug === state.compare.left; });
+    var rightRow = DATA.rows.find(function (r) { return r.slug === state.compare.right; });
+    if (!leftRow || !rightRow) return null;
+
+    var compareRows = [
+      { label: 'TVL USD', left: fmtUsd(leftRow.tvl_usd), right: fmtUsd(rightRow.tvl_usd), diff: fmtUsd(leftRow.tvl_usd - rightRow.tvl_usd) },
+      { label: '7d Growth', left: fmtPct(leftRow.change_7d), right: fmtPct(rightRow.change_7d), diff: fmtPct((leftRow.change_7d || 0) - (rightRow.change_7d || 0)) },
+      { label: 'Maturity (days)', left: fmtAge(leftRow.age_days), right: fmtAge(rightRow.age_days), diff: '' },
+      { label: 'Category Weight', left: (leftRow.category_weight || 1).toFixed(4), right: (rightRow.category_weight || 1).toFixed(4), diff: ((leftRow.category_weight || 1) - (rightRow.category_weight || 1)).toFixed(4) + '×' },
+      { label: 'Chain Bonus', left: (leftRow.chain_bonus || 1).toFixed(4), right: (rightRow.chain_bonus || 1).toFixed(4), diff: ((leftRow.chain_bonus || 1) - (rightRow.chain_bonus || 1)).toFixed(4) + '×' },
+      { label: 'TVL Momentum', left: (leftRow.tvl_momentum || 1).toFixed(4), right: (rightRow.tvl_momentum || 1).toFixed(4), diff: ((leftRow.tvl_momentum || 1) - (rightRow.tvl_momentum || 1)).toFixed(4) + '×' },
+      { label: 'Implied Value', left: fmtUsd(leftRow.implied_value_usd), right: fmtUsd(rightRow.implied_value_usd), diff: '' }
+    ];
+
+    var thead = el('thead', null,
+      el('tr', null,
+        el('th', { scope: 'col' }),
+        el('th', { text: leftRow.name }),
+        el('th', { text: rightRow.name }),
+        el('th', { text: 'Difference' })
+      )
+    );
+
+    var tbody = el('tbody');
+    compareRows.forEach(function (row) {
+      var tr = el('tr', null,
+        el('td', { class: 'label' }, row.label),
+        el('td', null, row.left),
+        el('td', null, row.right),
+        el('td', { class: 'diff' }, row.diff)
+      );
+      tbody.appendChild(tr);
+    });
+
+    return el('div', { class: 'panel' },
+      el('div', { class: 'table-wrap' },
+        el('table', null,
+          el('caption', { class: 'sub', text: 'Side-by-side comparison of two protocols\' model inputs' }),
+          thead,
           tbody
         )
       )
@@ -458,6 +528,11 @@
     shell.appendChild(lede());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
+    // Render compare table if two protocols are selected
+    var compareTable = renderCompare();
+    if (compareTable) {
+      shell.appendChild(compareTable);
+    }
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
     app.appendChild(shell);
     app.setAttribute('aria-busy', 'false');
@@ -468,6 +543,44 @@
   readHash();
   render();
   window.addEventListener('keydown', function (e) {
+    // / focuses search
+    if (e.key === '/') {
+      var search = document.getElementById('q');
+      if (search) { search.focus(); e.preventDefault(); }
+      return;
+    }
+    // Escape clears filters
+    if (e.key === 'Escape') {
+      state.q = '';
+      var search = document.getElementById('q');
+      if (search) { search.value = ''; render(); }
+      e.preventDefault();
+      return;
+    }
+    // Arrow keys move selected row
+    if (state.selected && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      var visibleRows = app.querySelectorAll('.panel.table-wrap tbody tr');
+      var currentIndex = -1;
+      visibleRows.forEach(function (tr, i) {
+        if (tr.dataset.selected === 'true') { currentIndex = i; }
+      });
+      var targetIndex;
+      if (e.key === 'ArrowUp') {
+        targetIndex = currentIndex === 0 ? 0 : currentIndex - 1;
+        if (targetIndex < 0) targetIndex = 0;
+      } else {
+        targetIndex = currentIndex === visibleRows.length - 1 ? visibleRows.length - 1 : currentIndex + 1;
+      }
+      // Deselect current, select target
+      visibleRows.forEach(function (tr) { tr.dataset.selected = 'false'; });
+      if (visibleRows[targetIndex]) {
+        visibleRows[targetIndex].dataset.selected = 'true';
+        state.selected = visibleRows[targetIndex].dataset.slug || null;
+      }
+      e.preventDefault();
+      return;
+    }
+    // Escape also closes detail drawer
     if (e.key === 'Escape' && dialog.open) dialog.close();
   });
 })();
