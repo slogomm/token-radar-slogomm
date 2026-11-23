@@ -583,4 +583,29 @@
     // Escape also closes detail drawer
     if (e.key === 'Escape' && dialog.open) dialog.close();
   });
+
+  // Accessibility: announce the live row count to screen readers whenever a filter changes.
+  // This keeps the board usable without sight, and costs no network requests.
+  var announcer = document.getElementById('announcer');
+  if (!announcer) {
+    announcer = document.createElement('div');
+    announcer.id = 'announcer';
+    announcer.setAttribute('aria-live', 'polite');
+    announcer.setAttribute('role', 'status');
+    announcer.style.position = 'absolute';
+    announcer.style.left = '-9999px';
+    document.body.appendChild(announcer);
+  }
+  function announceCount() {
+    var shown = document.querySelectorAll('#rows tr[data-slug]').length;
+    var label = shown === 1 ? '1 protocol' : shown + ' protocols';
+    announcer.textContent = 'Showing ' + label + ' of ' + DATA.rows.length + ' ranked rows.';
+  }
+  var origRender = window.renderBoard;
+  if (typeof origRender === 'function') {
+    window.renderBoard = function () { origRender(); announceCount(); };
+  } else {
+    document.addEventListener('makefun:render', announceCount);
+  }
+  announceCount();
 })();
