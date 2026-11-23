@@ -226,7 +226,7 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The three multipliers and the implied value one protocol gets under `model`. */
+/** The multipliers and the implied value one protocol gets under `model`. */
 export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; categoryWeight: number; chainBonus: number; tvlMomentum: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
@@ -234,18 +234,15 @@ export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: Mo
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  
-  // Category weight: lending/dex/perps/RWA score higher than bridges/staking/stable
+
   const category = protocol.category ?? 'Other';
   const categoryWeight = model.category_weights[category] ?? 1.0;
-  
-  // Chain count bonus: multi-chain = broader adoption
+
   const chainCount = protocol.chains.length;
   const chainBonus = model.chain_bonus[Math.min(chainCount, model.chain_bonus.length - 1)];
-  
-  // TVL momentum: positive 7d change adds signal, negative reduces slightly
+
   const tvlMomentum = 1 + Math.max(-0.05, Math.min(0.05, (rawGrowth / 100) * model.tvl_momentum_weight));
-  
+
   const base = protocol.tvl_usd * model.base_multiple;
   const implied = Math.max(1, Math.round(base * growthMult * maturityMult * categoryWeight * chainBonus * tvlMomentum));
   return { implied, growthPct, growthMult, maturityMult, categoryWeight, chainBonus, tvlMomentum, age };
@@ -269,26 +266,14 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
 
-/** The headline sentence's figures: how many watchlist slugs, how many rows, how many live protocols. */
-export interface BoardSummary {
-  watchlist_size: number;
-  board_size: number;
-  early_size: number;
-  live_size: number;
-}
-
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
-  // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
-  // board's coverage is the gate's row and is never gambled on a missing record).
   for (const slug of snapshot.watchlist) {
     const p = index.get(slug);
     if (p !== undefined) chosen.set(slug, p);
   }
-  // The early radar: pre-token protocols below the watchlist floor, by TVL, capped. Never a replacement
-  // for a watchlist row: a chosen protocol stays chosen.
   const early = snapshot.protocols
     .filter((p) => !chosen.has(p.slug) && isRankable(p) && p.tvl_usd < snapshot.floor_usd)
     .sort((a, b) => b.tvl_usd - a.tvl_usd || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
@@ -380,10 +365,7 @@ function actionFor(p: SnapshotProtocol, capital: number, chain: string): string 
   return `Deposit $${capital} of USDC into ${name} on ${chain}, perform the protocol's core action (supply, swap, stake), and hold the position.`;
 }
 
-/**
- * A protocol's farm plan: six steps, each an action with a cost and a time. The plan is derived from
- * the protocol's own record (category, chains, TVL, age), never from a hand-written list of names.
- */
+/** A protocol's farm plan: six steps derived from the protocol's own record, never a hand-written list of names. */
 export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const chain = chainOf(p);
   const capital = capitalFor(p);
@@ -391,7 +373,7 @@ export function farmSteps(p: SnapshotProtocol, age: number | null): FarmStep[] {
   const action = actionFor(p, capital, chain);
   const gasWeekly = capital >= 150 ? 8 : 4;
   const riskNote = riskFor(p);
-  
+
   return [
     {
       text: `Use a fresh wallet (hardware or new browser extension) that holds only the funds you plan to farm; store the seed phrase offline in a password manager or paper.`,
